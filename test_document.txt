@@ -1,0 +1,48 @@
+Privacy-Preserving AI Chatbot - Test Document
+
+This is a simple test document for the Privacy-Preserving AI Chatbot.
+You can use this to test the document search functionality on any platform including web browsers.
+
+KEY FEATURES:
+The chatbot maintains complete privacy by processing everything locally on your device.
+No data is ever sent to external servers or cloud services.
+All indexing and search happens right in your browser or on your mobile device.
+
+DOCUMENT SEARCH:
+You can load multiple documents and search through them using natural language queries.
+The system uses TF-IDF algorithm to find the most relevant passages.
+Search results are returned in under 300 milliseconds.
+
+PRIVACY GUARANTEES:
+Zero network calls during document processing.
+Your files stay on your device permanently.
+No third-party access to your personal data.
+Complete user control over all information.
+
+TECHNICAL IMPLEMENTATION:
+Built with Flutter for cross-platform compatibility.
+Uses SharedPreferences for local data storage on mobile.
+Uses IndexedDB for local data storage on web browsers.
+TF-IDF indexing provides intelligent search capabilities.
+
+TESTING INSTRUCTIONS:
+Load this document using the + button in the app.
+Try searching for keywords like "privacy", "search", or "algorithm".
+Check that results are returned quickly and accurately.
+Verify that everything works offline without internet connection.
+
+BENEFITS:
+Free forever with no subscription costs.
+Fast performance with sub-second search times.
+Works on Android, iOS, Web, Windows, macOS, and Linux.
+Open source code that anyone can audit for security.
+Educational tool for learning about privacy-preserving technology.
+
+SAMPLE SEARCH QUERIES:
+Search for privacy
+Find information about algorithm
+Look for testing instructions
+Search documents for features
+Find details about implementation
+
+END OF TEST DOCUMENT

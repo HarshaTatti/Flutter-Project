@@ -1,3 +1,5 @@
+// ignore_for_file: curly_braces_in_flow_control_structures
+
 import 'dart:math';
 
 /// Pure Dart AI Service - No external models needed
@@ -135,9 +137,9 @@ class SmartAIService {
 
     // Step 3: Detect question type
     String questionType = 'statement';
-    if (queryLower.contains('what'))
+    if (queryLower.contains('what')) {
       questionType = 'what';
-    else if (queryLower.contains('when'))
+    } else if (queryLower.contains('when'))
       questionType = 'when';
     else if (queryLower.contains('where'))
       questionType = 'where';

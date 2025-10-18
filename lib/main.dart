@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/screens/ChatScreen.dart';
+import 'package:flutter_application_1/screens/chat_screen.dart';
 import 'services/local_data_service.dart';
 
 void main() async {

@@ -66,30 +66,80 @@ class DocumentService {
   }
 
   /// Delete a document and its local file (if any), then reindex
+  /// This completely removes the document from storage and reduces app data
   Future<void> deleteDocumentAndFile(String id) async {
     try {
       final doc = _documents.firstWhere((d) => d.id == id);
+
+      // Delete the physical file if it exists
       final path = doc.filePath;
       if (path != null && path.isNotEmpty) {
         final f = File(path);
         if (await f.exists()) {
           await f.delete();
+          print('Deleted file: $path');
         }
       }
-    } catch (_) {
-      // If not found or delete fails, continue to remove from index
+
+      // Remove all chunks associated with this document
+      final chunkIds = _chunks.keys
+          .where((key) => key.startsWith('${doc.id}_'))
+          .toList();
+      for (final chunkId in chunkIds) {
+        _chunks.remove(chunkId);
+        _chunkIndex.remove(chunkId);
+      }
+
+      // Remove document index
+      _tfidfIndex.remove(doc.id);
+
+      // Remove from document list
+      _documents.removeWhere((d) => d.id == id);
+
+      // Save updated document list (this reduces SharedPreferences storage)
+      await _saveDocuments();
+
+      // Rebuild index to ensure consistency
+      _buildIndex();
+
+      print('Document $id deleted. Storage reduced.');
+    } catch (e) {
+      print('Error deleting document $id: $e');
+      // If not found or delete fails, still try to remove from index
+      await removeDocument(id);
     }
-    await removeDocument(id);
   }
 
-  /// Clear all documents
+  /// Clear all documents and their physical files
+  /// This completely removes all document data and frees up storage
   Future<void> clearAllDocuments() async {
+    // Delete all physical files
+    for (final doc in _documents) {
+      final path = doc.filePath;
+      if (path != null && path.isNotEmpty) {
+        try {
+          final f = File(path);
+          if (await f.exists()) {
+            await f.delete();
+            print('Deleted file: $path');
+          }
+        } catch (e) {
+          print('Error deleting file $path: $e');
+        }
+      }
+    }
+
+    // Clear all in-memory data structures
     _documents.clear();
     _tfidfIndex.clear();
     _chunks.clear();
     _chunkIndex.clear();
+
+    // Remove from persistent storage
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_documentsKey);
+
+    print('All documents cleared. Storage freed.');
   }
 
   /// Build TF-IDF index for all documents (LOCAL PROCESSING)
@@ -193,6 +243,7 @@ class DocumentService {
   }
 
   /// Search documents using TF-IDF (LOCAL QUERY PROCESSING)
+  /// Enhanced with better accuracy and context-aware ranking
   List<SearchResult> search(String query, {int maxResults = 5}) {
     if (_documents.isEmpty || query.trim().isEmpty) {
       return [];
@@ -201,22 +252,46 @@ class DocumentService {
     final queryWords = _tokenize(query);
     final scores = <String, double>{};
 
-    // First, score chunks using BM25-like index for better recall
+    // Enhanced scoring: score chunks using BM25-like index
     final chunkScores = <String, double>{};
     for (final entry in _chunkIndex.entries) {
       double score = 0.0;
+      int matchedTerms = 0;
+
       for (final word in queryWords) {
-        score += entry.value[word] ?? 0.0;
+        final termScore = entry.value[word] ?? 0.0;
+        if (termScore > 0) {
+          score += termScore;
+          matchedTerms++;
+        }
       }
+
+      // Boost score if multiple query terms match (phrase proximity bonus)
+      if (matchedTerms > 1) {
+        score *= (1.0 + (matchedTerms * 0.2)); // 20% bonus per matched term
+      }
+
+      // Check for exact phrase matches (highest priority)
+      final chunkText = _chunks[entry.key]!.text.toLowerCase();
+      if (chunkText.contains(query.toLowerCase())) {
+        score *= 2.5; // 150% bonus for exact phrase match
+      }
+
       if (score > 0) chunkScores[entry.key] = score;
     }
 
-    // Aggregate chunk scores per document and keep best chunk for snippet
+    // Aggregate chunk scores per document and keep best chunks
     final docBestChunk = <String, String>{}; // docId -> chunkId
+    final docAllChunks = <String, List<String>>{}; // docId -> [chunkIds]
+
     for (final cs in chunkScores.entries) {
       final chunk = _chunks[cs.key]!;
       final docId = chunk.documentId;
       scores[docId] = (scores[docId] ?? 0.0) + cs.value;
+
+      // Track all relevant chunks
+      docAllChunks.putIfAbsent(docId, () => []).add(cs.key);
+
       final currentBest = docBestChunk[docId];
       if (currentBest == null ||
           (chunkScores[cs.key]! > (chunkScores[currentBest] ?? 0.0))) {
@@ -233,16 +308,55 @@ class DocumentService {
       final doc = _documents.firstWhere((d) => d.id == id);
       String snippet;
       final bestChunkId = docBestChunk[id];
+
       if (bestChunkId != null) {
+        // Extract snippet from best matching chunk
         snippet = _extractRelevantSnippet(
           _chunks[bestChunkId]!.text,
           queryWords,
+          query: query,
         );
       } else {
-        snippet = _extractRelevantSnippet(doc.content, queryWords);
+        snippet = _extractRelevantSnippet(
+          doc.content,
+          queryWords,
+          query: query,
+        );
       }
+
+      // Add context from multiple relevant chunks if available
+      final allChunkIds = docAllChunks[id] ?? [];
+      if (allChunkIds.length > 1) {
+        // Sort chunks by score
+        allChunkIds.sort(
+          (a, b) => (chunkScores[b] ?? 0.0).compareTo(chunkScores[a] ?? 0.0),
+        );
+
+        // Include additional context from top chunks
+        final additionalContext = <String>[];
+        for (int i = 1; i < min(3, allChunkIds.length); i++) {
+          final contextSnippet = _extractRelevantSnippet(
+            _chunks[allChunkIds[i]]!.text,
+            queryWords,
+            maxLength: 100,
+          );
+          if (contextSnippet.isNotEmpty && !snippet.contains(contextSnippet)) {
+            additionalContext.add(contextSnippet);
+          }
+        }
+
+        if (additionalContext.isNotEmpty) {
+          snippet = '$snippet ... ${additionalContext.join(" ... ")}';
+        }
+      }
+
       results.add(
-        SearchResult(document: doc, score: scores[id]!, snippet: snippet),
+        SearchResult(
+          document: doc,
+          score: scores[id]!,
+          snippet: snippet,
+          relevantChunks: allChunkIds.length,
+        ),
       );
     }
 
@@ -250,69 +364,150 @@ class DocumentService {
   }
 
   /// Return top-N chunk texts across all documents for a query, with scores
+  /// ENHANCED: Multi-strategy ranking for maximum accuracy
   List<ChunkSearchResult> searchTopChunks(String query, {int maxChunks = 12}) {
     if (_documents.isEmpty || query.trim().isEmpty) return [];
+
     final queryWords = _tokenize(query);
+    final queryLower = query.toLowerCase();
     final chunkScores = <String, double>{};
 
-    // Score each chunk
+    // STRATEGY 1: TF-IDF scoring with enhanced weighting
     for (final entry in _chunkIndex.entries) {
       double score = 0.0;
+      int matchedTerms = 0;
+
       for (final w in queryWords) {
-        score += entry.value[w] ?? 0.0;
+        final termScore = entry.value[w] ?? 0.0;
+        if (termScore > 0) {
+          score += termScore;
+          matchedTerms++;
+        }
       }
+
       if (score > 0) {
+        // Bonus for matching multiple terms
+        if (matchedTerms > 1) {
+          score *= (1.0 + (matchedTerms * 0.25));
+        }
         chunkScores[entry.key] = score;
       }
     }
 
-    // If no TF-IDF matches, do a simpler word matching with fuzzy support
-    if (chunkScores.isEmpty) {
-      final simpleQueryWords = query
-          .toLowerCase()
-          .split(RegExp(r'\s+'))
-          .where((w) => w.length > 2)
-          .toList();
+    // STRATEGY 2: Exact phrase matching (HIGHEST PRIORITY)
+    for (final entry in _chunks.entries) {
+      final chunkText = entry.value.text.toLowerCase();
 
-      for (final entry in _chunks.entries) {
-        final chunkText = entry.value.text.toLowerCase();
-        final chunkWords = chunkText.split(RegExp(r'\s+'));
-        double matches = 0;
+      // Exact phrase match - massive boost
+      if (chunkText.contains(queryLower)) {
+        final currentScore = chunkScores[entry.key] ?? 0.0;
+        chunkScores[entry.key] = currentScore + 10.0; // Big bonus
 
-        for (final queryWord in simpleQueryWords) {
-          // Exact match
-          if (chunkText.contains(queryWord)) {
-            matches += 1.0;
-          } else {
-            // Fuzzy match for spelling mistakes
-            for (final chunkWord in chunkWords) {
-              if (chunkWord.length > 2) {
-                final similarity = _calculateSimilarity(queryWord, chunkWord);
-                if (similarity > 0.75) {
-                  // 75% similarity for fuzzy match
-                  matches += 0.7 * similarity; // Lower score for fuzzy
-                  break;
-                }
-              }
-            }
-          }
+        // Extra boost if phrase is near the beginning (often more relevant)
+        final position = chunkText.indexOf(queryLower);
+        if (position < 100) {
+          chunkScores[entry.key] = chunkScores[entry.key]! + 2.0;
         }
+      }
 
-        if (matches > 0) {
-          chunkScores[entry.key] =
-              matches * 0.5; // Lower score for simple match
+      // STRATEGY 3: Whole word boundary matching
+      for (final queryWord in queryWords) {
+        if (queryWord.length > 3) {
+          final wordBoundary = RegExp(r'\b' + RegExp.escape(queryWord) + r'\b');
+          final matches = wordBoundary.allMatches(chunkText).length;
+          if (matches > 0) {
+            final currentScore = chunkScores[entry.key] ?? 0.0;
+            // Boost for each whole word match
+            chunkScores[entry.key] = currentScore + (matches * 0.8);
+          }
         }
       }
     }
 
+    // STRATEGY 4: Semantic proximity (terms appearing close together)
+    for (final entry in _chunks.entries) {
+      final chunkText = entry.value.text.toLowerCase();
+      if (queryWords.length > 1) {
+        // Find positions of all query words
+        final positions = <int>[];
+        for (final word in queryWords) {
+          int pos = chunkText.indexOf(word);
+          if (pos != -1) {
+            positions.add(pos);
+          }
+        }
+
+        // If multiple terms found, check proximity
+        if (positions.length > 1) {
+          positions.sort();
+          // Calculate average distance between terms
+          int totalDistance = 0;
+          for (int i = 1; i < positions.length; i++) {
+            totalDistance += (positions[i] - positions[i - 1]);
+          }
+          final avgDistance = totalDistance / (positions.length - 1);
+
+          // Closer terms = higher relevance
+          if (avgDistance < 100) {
+            final proximityBonus = (100 - avgDistance) / 50;
+            final currentScore = chunkScores[entry.key] ?? 0.0;
+            chunkScores[entry.key] = currentScore + proximityBonus;
+          }
+        }
+      }
+    }
+
+    // STRATEGY 5: Fuzzy matching for typos (fallback only)
+    if (chunkScores.isEmpty || chunkScores.values.every((s) => s < 0.5)) {
+      final simpleQueryWords = query
+          .toLowerCase()
+          .split(RegExp(r'\s+'))
+          .where((w) => w.length > 3)
+          .toList();
+
+      for (final entry in _chunks.entries) {
+        final chunkText = entry.value.text.toLowerCase();
+        final chunkWords = chunkText
+            .split(RegExp(r'\W+'))
+            .where((w) => w.length > 3)
+            .toList();
+        double fuzzyScore = 0;
+
+        for (final queryWord in simpleQueryWords) {
+          // First try substring match
+          if (chunkText.contains(queryWord)) {
+            fuzzyScore += 1.0;
+            continue;
+          }
+
+          // Then try fuzzy matching
+          for (final chunkWord in chunkWords) {
+            final similarity = _calculateSimilarity(queryWord, chunkWord);
+            if (similarity > 0.8) {
+              fuzzyScore += similarity * 0.6;
+              break;
+            }
+          }
+        }
+
+        if (fuzzyScore > 0) {
+          final currentScore = chunkScores[entry.key] ?? 0.0;
+          chunkScores[entry.key] = currentScore + (fuzzyScore * 0.4);
+        }
+      }
+    }
+
+    // Sort by score and return top results
     final sorted = chunkScores.keys.toList()
       ..sort((a, b) => chunkScores[b]!.compareTo(chunkScores[a]!));
+
     final results = <ChunkSearchResult>[];
     for (final id in sorted.take(maxChunks)) {
       final c = _chunks[id]!;
+      final doc = _documents.firstWhere((d) => d.id == c.documentId);
       results.add(
         ChunkSearchResult(
-          documentId: c.documentId,
+          documentId: doc.name, // Use document name instead of ID
           chunkText: c.text,
           score: chunkScores[id]!,
         ),
@@ -416,41 +611,116 @@ class DocumentService {
     return stopWords.contains(word);
   }
 
-  /// Extract relevant snippet from document
-  String _extractRelevantSnippet(String content, List<String> queryWords) {
-    const maxLength = 200;
-    final sentences = content.split(RegExp(r'[.!?]\s+'));
+  /// Extract relevant snippet from document with enhanced accuracy
+  String _extractRelevantSnippet(
+    String content,
+    List<String> queryWords, {
+    String? query,
+    int maxLength = 250,
+  }) {
+    // First, try to find exact phrase match
+    if (query != null && query.isNotEmpty) {
+      final queryLower = query.toLowerCase();
+      final contentLower = content.toLowerCase();
+      final index = contentLower.indexOf(queryLower);
 
-    // Find sentence with most query words
-    int bestScore = 0;
-    String bestSentence = '';
+      if (index != -1) {
+        // Found exact phrase, extract context around it
+        final start = max(0, index - 50);
+        final end = min(content.length, index + query.length + 150);
+        String snippet = content.substring(start, end).trim();
 
-    for (var sentence in sentences) {
+        if (start > 0) snippet = '...$snippet';
+        if (end < content.length) snippet = '$snippet...';
+
+        return snippet;
+      }
+    }
+
+    // Split into sentences with better handling of various punctuation
+    final sentences = content.split(RegExp(r'[.!?]\s+|[\n]{2,}'));
+
+    // Find sentences with most query words
+    final scoredSentences = <({int score, String sentence, int position})>[];
+
+    for (int i = 0; i < sentences.length; i++) {
+      final sentence = sentences[i].trim();
+      if (sentence.isEmpty) continue;
+
       final sentenceLower = sentence.toLowerCase();
       int score = 0;
+      int exactMatches = 0;
 
+      // Count query word matches
       for (var word in queryWords) {
         if (sentenceLower.contains(word)) {
           score++;
+          // Check if it's a whole word match (more accurate)
+          if (RegExp(
+            r'\b' + RegExp.escape(word) + r'\b',
+          ).hasMatch(sentenceLower)) {
+            exactMatches++;
+          }
         }
       }
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestSentence = sentence.trim();
+      // Boost score for exact word matches
+      score += exactMatches;
+
+      // Slight boost for sentences near the beginning (often more important)
+      if (i < 3) score += 1;
+
+      if (score > 0) {
+        scoredSentences.add((score: score, sentence: sentence, position: i));
       }
     }
 
-    if (bestSentence.isEmpty && sentences.isNotEmpty) {
-      bestSentence = sentences.first.trim();
+    if (scoredSentences.isEmpty && sentences.isNotEmpty) {
+      // No matches found, return first meaningful sentence
+      for (final sentence in sentences) {
+        final trimmed = sentence.trim();
+        if (trimmed.length > 20) {
+          return trimmed.length > maxLength
+              ? '${trimmed.substring(0, maxLength)}...'
+              : trimmed;
+        }
+      }
+      return sentences.first.trim();
+    }
+
+    // Sort by score (descending), then by position (ascending for earlier sentences)
+    scoredSentences.sort((a, b) {
+      final scoreCompare = b.score.compareTo(a.score);
+      if (scoreCompare != 0) return scoreCompare;
+      return a.position.compareTo(b.position);
+    });
+
+    // Get best sentences and combine if they're adjacent
+    final bestSentences = scoredSentences.take(2).toList();
+    String snippet;
+
+    if (bestSentences.length > 1 &&
+        (bestSentences[0].position - bestSentences[1].position).abs() == 1) {
+      // Adjacent sentences, combine them
+      final sortedByPosition = bestSentences
+        ..sort((a, b) => a.position.compareTo(b.position));
+      snippet = sortedByPosition.map((s) => s.sentence).join(' ');
+    } else {
+      snippet = bestSentences.first.sentence;
     }
 
     // Truncate if too long
-    if (bestSentence.length > maxLength) {
-      return '${bestSentence.substring(0, maxLength)}...';
+    if (snippet.length > maxLength) {
+      // Try to truncate at a word boundary
+      int truncateAt = maxLength;
+      final lastSpace = snippet.lastIndexOf(' ', maxLength);
+      if (lastSpace > maxLength - 50) {
+        truncateAt = lastSpace;
+      }
+      return '${snippet.substring(0, truncateAt)}...';
     }
 
-    return bestSentence;
+    return snippet;
   }
 
   /// Get statistics about loaded documents
@@ -460,11 +730,34 @@ class DocumentService {
       (sum, doc) => sum + _tokenize(doc.content).length,
     );
 
+    final totalSize = _documents.fold<int>(
+      0,
+      (sum, doc) => sum + (doc.sizeBytes ?? doc.content.length),
+    );
+
+    final totalChars = _documents.fold<int>(
+      0,
+      (sum, doc) => sum + doc.content.length,
+    );
+
     return {
       'documentCount': _documents.length,
       'totalWords': totalWords,
       'chunkCount': _chunks.length,
+      'totalSizeBytes': totalSize,
+      'totalCharacters': totalChars,
+      'storageMB': (totalSize / (1024 * 1024)).toStringAsFixed(2),
     };
+  }
+
+  /// Get storage size for a specific document
+  int getDocumentSize(String id) {
+    try {
+      final doc = _documents.firstWhere((d) => d.id == id);
+      return doc.sizeBytes ?? doc.content.length;
+    } catch (_) {
+      return 0;
+    }
   }
 
   /// Calculate similarity between two strings (for fuzzy matching)
@@ -523,11 +816,13 @@ class SearchResult {
   final Document document;
   final double score;
   final String snippet;
+  final int relevantChunks; // Number of chunks that matched the query
 
   SearchResult({
     required this.document,
     required this.score,
     required this.snippet,
+    this.relevantChunks = 1,
   });
 }
 

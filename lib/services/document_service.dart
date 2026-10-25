@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/document.dart';
 
@@ -71,13 +72,13 @@ class DocumentService {
     try {
       final doc = _documents.firstWhere((d) => d.id == id);
 
-      // Delete the physical file if it exists
+      // Delete the physical file if it exists (non-web)
       final path = doc.filePath;
-      if (path != null && path.isNotEmpty) {
+      if (!kIsWeb && path != null && path.isNotEmpty) {
         final f = File(path);
         if (await f.exists()) {
           await f.delete();
-          print('Deleted file: $path');
+          debugPrint('Deleted file: $path');
         }
       }
 
@@ -102,9 +103,9 @@ class DocumentService {
       // Rebuild index to ensure consistency
       _buildIndex();
 
-      print('Document $id deleted. Storage reduced.');
+      debugPrint('Document $id deleted. Storage reduced.');
     } catch (e) {
-      print('Error deleting document $id: $e');
+      debugPrint('Error deleting document $id: $e');
       // If not found or delete fails, still try to remove from index
       await removeDocument(id);
     }
@@ -113,18 +114,20 @@ class DocumentService {
   /// Clear all documents and their physical files
   /// This completely removes all document data and frees up storage
   Future<void> clearAllDocuments() async {
-    // Delete all physical files
-    for (final doc in _documents) {
-      final path = doc.filePath;
-      if (path != null && path.isNotEmpty) {
-        try {
-          final f = File(path);
-          if (await f.exists()) {
-            await f.delete();
-            print('Deleted file: $path');
+    // Delete all physical files (non-web)
+    if (!kIsWeb) {
+      for (final doc in _documents) {
+        final path = doc.filePath;
+        if (path != null && path.isNotEmpty) {
+          try {
+            final f = File(path);
+            if (await f.exists()) {
+              await f.delete();
+              debugPrint('Deleted file: $path');
+            }
+          } catch (e) {
+            debugPrint('Error deleting file $path: $e');
           }
-        } catch (e) {
-          print('Error deleting file $path: $e');
         }
       }
     }
@@ -139,7 +142,7 @@ class DocumentService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_documentsKey);
 
-    print('All documents cleared. Storage freed.');
+    debugPrint('All documents cleared. Storage freed.');
   }
 
   /// Build TF-IDF index for all documents (LOCAL PROCESSING)

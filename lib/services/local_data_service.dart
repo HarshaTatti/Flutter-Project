@@ -31,6 +31,13 @@ class LocalDataService {
     }
   }
 
+  /// Force reset personal data to default sample values
+  Future<void> resetToSampleData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_personalDataKey);
+    await initializeSampleData();
+  }
+
   /// Save personal data locally
   Future<void> savePersonalData(PersonalData data) async {
     final prefs = await SharedPreferences.getInstance();

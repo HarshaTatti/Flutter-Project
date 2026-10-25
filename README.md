@@ -100,17 +100,63 @@ This project includes comprehensive documentation:
 - ✅ macOS
 - ✅ Linux
 
-## 🎯 Project Structure
+## 🎨 Theme Switcher & Accessibility (Light, Dark, High-Contrast)
+
+The application features a built-in theme switcher accessible across all pages via the top AppBar and Settings screen:
+
+1. **Light Theme**: Modern light surface with balanced indigo and slate typography.
+2. **Dark Theme**: Deep slate background (`#0B0F19`) with vibrant accents and optimal contrast.
+3. **High-Contrast Theme (WCAG AAA)**: Pure black background (`#000000`), white text, electric yellow (`#FFE600`) and cyan (`#00E5FF`) accents, and prominent 2.5px solid borders for maximum accessibility.
+
+- **Immediate switching**: Theme changes take effect across all screens instantly without restarting.
+- **Persistence**: Preferences are saved locally in `SharedPreferences` and restored automatically upon reload.
+
+## 🎯 Architecture & Responsive Pages
 
 ```
 lib/
-├── main.dart                      # Main UI and app
+├── main.dart                           # App entry point with MultiProvider & Named Routes
+├── theme/
+│   ├── app_themes.dart                # Light, Dark, & High-Contrast ThemeData definitions
+│   └── theme_controller.dart          # ChangeNotifier managing theme state & local persistence
+├── screens/
+│   ├── home_screen.dart               # Welcoming landing page with hero & feature cards
+│   ├── chat_screen.dart               # Interactive chatbot with local on-device NLP
+│   ├── documents_screen.dart          # Document management with client-side upload & parsing
+│   └── settings_screen.dart           # App settings, theme selector, & privacy controls
+├── widgets/
+│   ├── app_nav_scaffold.dart          # Responsive navigation & persistent AppBar theme selector
+│   ├── theme_switcher.dart            # Reusable theme switcher (dropdown, segmented, cards)
+│   └── feature_card.dart              # Interactive feature card component
 ├── models/
-│   ├── personal_data.dart        # Data model
-│   └── chat_message.dart         # Message model
+│   ├── personal_data.dart             # Local user profile model
+│   ├── chat_message.dart              # Chat message model with source transparency
+│   └── document.dart                  # Loaded document model
 └── services/
-    ├── local_data_service.dart   # Storage service
-    └── chatbot_service.dart      # Query processing
+    ├── chatbot_service.dart           # Local NLP query processor
+    ├── document_service.dart          # TF-IDF indexing & document store
+    ├── smart_ai_service.dart          # Offline intent classifier & entity extractor
+    ├── file_text_extractor.dart       # Pure Dart in-memory extractor (.pdf, .docx, .pptx, etc.)
+    └── local_data_service.dart        # SharedPreferences local profile data manager
+```
+
+## 🧪 Testing & Verification
+
+```bash
+# 1. Fetch dependencies
+flutter pub get
+
+# 2. Analyze code (zero issues)
+flutter analyze
+
+# 3. Run all tests
+flutter test
+
+# 4. Build web production bundle
+flutter build web
+
+# 5. Run locally on Chrome
+flutter run -d chrome
 ```
 
 ## 🎓 Learning Resources

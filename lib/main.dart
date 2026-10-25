@@ -1,54 +1,52 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/screens/chat_screen.dart';
+import 'package:provider/provider.dart';
+
+import 'screens/chat_screen.dart';
+import 'screens/documents_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/settings_screen.dart';
 import 'services/local_data_service.dart';
+import 'theme/theme_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize sample data on first run
+  // Initialize sample profile data if running for the first time
   final localDataService = LocalDataService();
   await localDataService.initializeSampleData();
 
-  runApp(const MyApp());
+  // Initialize theme controller and load persisted theme preference
+  final themeController = ThemeController();
+  await themeController.loadTheme();
+
+  runApp(
+    ChangeNotifierProvider<ThemeController>.value(
+      value: themeController,
+      child: const PrivacyChatbotApp(),
+    ),
+  );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PrivacyChatbotApp extends StatelessWidget {
+  const PrivacyChatbotApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Privacy AI Assistant',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6366F1),
-          brightness: Brightness.light,
-        ),
-        appBarTheme: const AppBarTheme(
-          elevation: 0,
-          centerTitle: true,
-          backgroundColor: Colors.transparent,
-          foregroundColor: Colors.white,
-        ),
-        cardTheme: CardThemeData(
-          elevation: 8,
-          shadowColor: Colors.black.withValues(alpha: 0.1),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-          ),
-        ),
-      ),
-      home: const ChatScreen(),
+    return Consumer<ThemeController>(
+      builder: (context, themeController, child) {
+        return MaterialApp(
+          title: 'Privacy-Preserving Chatbot',
+          debugShowCheckedModeBanner: false,
+          theme: themeController.themeData,
+          initialRoute: '/',
+          routes: {
+            '/': (context) => const HomeScreen(),
+            '/chat': (context) => const ChatScreen(),
+            '/documents': (context) => const DocumentsScreen(),
+            '/settings': (context) => const SettingsScreen(),
+          },
+        );
+      },
     );
   }
 }

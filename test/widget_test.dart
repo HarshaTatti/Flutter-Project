@@ -1,30 +1,65 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/theme/app_themes.dart';
+import 'package:flutter_application_1/theme/theme_controller.dart';
+import 'package:flutter_application_1/widgets/theme_switcher.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  testWidgets('PrivacyChatbotApp smoke test and homepage rendering', (WidgetTester tester) async {
+    final themeController = ThemeController();
+    await themeController.loadTheme();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<ThemeController>.value(
+        value: themeController,
+        child: const PrivacyChatbotApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify AppBar title is present
+    expect(find.text('Privacy-Preserving Chatbot'), findsWidgets);
+
+    // Verify Hero text
+    expect(find.text('Intelligent AI Assistance,\nCompletely Private.'), findsOneWidget);
+
+    // Verify Start Chatting button
+    expect(find.text('Start Chatting'), findsOneWidget);
+
+    // Verify ThemeSwitcher is mounted
+    expect(find.byType(ThemeSwitcher), findsWidgets);
+  });
+
+  testWidgets('Theme switching changes MaterialApp theme immediately', (WidgetTester tester) async {
+    final themeController = ThemeController();
+    await themeController.loadTheme();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<ThemeController>.value(
+        value: themeController,
+        child: const PrivacyChatbotApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Initial theme is light
+    expect(themeController.currentTheme, AppTheme.light);
+
+    // Switch to High Contrast
+    await themeController.setTheme(AppTheme.highContrast);
+    await tester.pumpAndSettle();
+
+    expect(themeController.isHighContrast, isTrue);
+
+    // Verify MaterialApp updated theme
+    final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(materialApp.theme?.scaffoldBackgroundColor, Colors.black);
   });
 }
